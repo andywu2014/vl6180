@@ -40,10 +40,11 @@ namespace VL6180 {
     }
 
     /**
-     * TODO: describe your function here
-     * @param addr describe value here, eg: 5
+     * 获取距离
+     * @param addr vl6180 7-bit i2c 地址, eg: 0x29
      */
-    //% block
+    //% addr.min=0x07 addr.max=0x77 addr.defl=0x29 
+    //% block="读取地址为 %addr 的VL6180的距离"
     export function readRange(addr: number): number {
         write1Byte(addr, SYSRANGE__START, 1)
         basic.pause(1000)
