@@ -4,12 +4,6 @@
 * 想了解更详细的信息，请前往 https://makecode.microbit.org/blocks/custom
 */
 
-enum MyEnum {
-    //% block="one"
-    One,
-    //% block="two"
-    Two
-}
 
 /**
  * VL6180 blocks
@@ -23,6 +17,8 @@ namespace VL6180 {
     //%  addr.min=0x07 addr.max=0x77 addr.defl=0x29 block="初始化地址为 %addr 的VL6180"
     //% weight=100
     export function initVL6180(addr: number): void {
+        // wait for Hardware standby and DeviceBooted
+        basic.pause(2)
         initVL6180_impl(addr)
     }
 
@@ -32,8 +28,8 @@ namespace VL6180 {
      * @param newAddr 计划新设置的 7-bit i2c 地址
      */
     //%  addr.min=0x07 addr.max=0x77 addr.defl=0x29 
-    //%  newAddr.min=0x07 addr.newAddr=0x77
-    //% block="设置在地址 %addr 的VL6180 | 新地址为 %newAddr"
+    //%  newAddr.min=0x07 addr.newAddr=0x77 newAddr.defl=0x29
+    //% block="设置在地址 %addr 的VL6180|新地址为 %newAddr"
     //% weight=10
     export function setNewAddr(addr: number, newAddr: number):void {
         write1Byte(addr, I2C_SLAVE__DEVICE_ADDRESS, newAddr)
@@ -47,19 +43,39 @@ namespace VL6180 {
     //% block="读取地址为 %addr 的VL6180的距离"
     export function readRange(addr: number): number {
         write1Byte(addr, SYSRANGE__START, 1)
-        basic.pause(1000)
+        // pre-cal + ct of 50mm 88% + readout
+        const delay = 3.2 + 0.24 + 4.3
+        basic.pause(delay)
+        while ((read1Byte(addr, RESULT__INTERRUPT_STATUS_GPIO)
+            & CONFIG_GPIO_INTERRUPT_NEW_SAMPLE_READY) == 0) {
+            basic.pause(1)
+        }
         let ret = read1Byte(addr, RESULT__RANGE_VAL)
-        write1Byte(addr, SYSTEM__INTERRUPT_CLEAR, 1)
+        write1Byte(addr, SYSTEM__INTERRUPT_CLEAR, INTERRUPT_CLEAR_RANGING)
         return ret
     }
+
+    // todo: SNR, SystemError, ECE Failed, Offset CAL
 }
 
+// reg addr
 const SYSRANGE__START = 0x18
 const RESULT__INTERRUPT_STATUS_GPIO = 0x4F
 const RESULT__RANGE_VAL = 0x62
 const SYSTEM__INTERRUPT_CLEAR = 0x15
 const SYSTEM__FRESH_OUT_OF_RESET = 0x16
 const I2C_SLAVE__DEVICE_ADDRESS = 0x212
+const SYSTEM__INTERRUPT_CONFIG_GPIO = 0x14
+const SYSRANGE__THRESH_HIGH = 0x019
+const SYSRANGE__THRESH_LOW = 0x019
+
+const CONFIG_GPIO_INTERRUPT_NEW_SAMPLE_READY = 0x04
+/** clear ranging interrupt in write to #SYSTEM_INTERRUPT_CLEAR */
+const INTERRUPT_CLEAR_RANGING = 0x01
+/** clear als interrupt  in write to #SYSTEM_INTERRUPT_CLEAR */
+const INTERRUPT_CLEAR_ALS = 0x02
+/** clear error interrupt in write to #SYSTEM_INTERRUPT_CLEAR */
+const INTERRUPT_CLEAR_ERROR = 0x04
 
 // Initialize sensor with settings from ST application note AN4545, section
 // "SR03 settings" - "Mandatory : private registers"
@@ -97,6 +113,14 @@ function initVL6180_impl(i2caddr: number) {
         write1Byte(i2caddr, 0x1A7, 0x1F);
         write1Byte(i2caddr, 0x030, 0x00);
 
+        // set range interrupt
+        write1Byte(i2caddr, SYSTEM__INTERRUPT_CONFIG_GPIO, CONFIG_GPIO_INTERRUPT_NEW_SAMPLE_READY)
+        // range: 8~200 
+        write1Byte(i2caddr, SYSRANGE__THRESH_HIGH, 200)
+        write1Byte(i2caddr, SYSRANGE__THRESH_LOW, 8)
+        // clear all interrupt
+        write1Byte(i2caddr, SYSTEM__INTERRUPT_CLEAR, INTERRUPT_CLEAR_ERROR | INTERRUPT_CLEAR_RANGING | INTERRUPT_CLEAR_ALS)
+
         write1Byte(i2caddr, SYSTEM__FRESH_OUT_OF_RESET, 0)
     }
 }
@@ -115,6 +139,6 @@ function read1Byte(i2caddr: number, reg: number) {
         NumberFormat.UInt16BE,
         true
     )
-    return pins.i2cReadNumber(i2caddr, NumberFormat.Int8LE, false)
+    return pins.i2cReadNumber(i2caddr, NumberFormat.UInt8BE, false)
 }
 
