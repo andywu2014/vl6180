@@ -43,19 +43,20 @@ namespace VL6180 {
     //% block="读取地址为 %addr 的VL6180的距离"
     export function readRange(addr: number): number {
         write1Byte(addr, SYSRANGE__START, 1)
-        // pre-cal + ct of 50mm 88% + readout
-        const delay = 3.2 + 0.24 + 4.3
-        basic.pause(delay)
-        while ((read1Byte(addr, RESULT__INTERRUPT_STATUS_GPIO)
-            & CONFIG_GPIO_INTERRUPT_NEW_SAMPLE_READY) == 0) {
-            basic.pause(1)
-        }
-        let ret = read1Byte(addr, RESULT__RANGE_VAL)
-        write1Byte(addr, SYSTEM__INTERRUPT_CLEAR, INTERRUPT_CLEAR_RANGING)
-        return ret
+        return waitARange(addr)
     }
 
     // todo: SNR, SystemError, ECE Failed, Offset CAL
+
+    //% block="当VL6180测到数据时，平滑窗口为 %meanTimes"
+    export function continualRange(meanTimes:number, body:()=>void):void {
+
+    }
+
+    //% block
+    export function latestValue():number {
+        return 0
+    }
 }
 
 // reg addr
@@ -140,5 +141,18 @@ function read1Byte(i2caddr: number, reg: number) {
         true
     )
     return pins.i2cReadNumber(i2caddr, NumberFormat.UInt8BE, false)
+}
+
+function waitARange(addr: number):number {
+    // pre-cal + ct of 50mm 88% + readout
+    const delay = 3.2 + 0.24 + 4.3
+    basic.pause(delay)
+    while ((read1Byte(addr, RESULT__INTERRUPT_STATUS_GPIO)
+        & CONFIG_GPIO_INTERRUPT_NEW_SAMPLE_READY) == 0) {
+        basic.pause(1)
+    }
+    let ret = read1Byte(addr, RESULT__RANGE_VAL)
+    write1Byte(addr, SYSTEM__INTERRUPT_CLEAR, INTERRUPT_CLEAR_RANGING)
+    return ret
 }
 
