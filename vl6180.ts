@@ -23,10 +23,10 @@ namespace VL6180 {
         newAddr = newAddr ? newAddr:0x29
         // wait for Hardware standby and DeviceBooted
         basic.pause(2)
-        initVL6180_impl(DefaultAddr)
         if (newAddr != DefaultAddr) {
             setNewAddr(DefaultAddr, newAddr)
         }
+        initVL6180_impl(newAddr)
         
         control.raiseEvent(VL6180Inited, newAddr)
     }
