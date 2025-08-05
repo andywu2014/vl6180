@@ -10,16 +10,25 @@
  */
 //% weight=40 color=#D35B53 icon="\uf2db"
 namespace VL6180 {
+    
     /**
-     * 初始化
+     * 初始化并可设置新地址
      * @param addr vl6180 7-bit i2c 地址, eg: 0x29
+     * @param win 平滑滤波的窗口长度, eg: 10
      */
-    //%  addr.min=0x07 addr.max=0x77 addr.defl=0x29 block="初始化地址为 %addr 的VL6180"
+    //% newAddr.min=0x07 newAddr.max=0x77 newAddr.defl=0x29
+    //% block="初始化VL6180 || ，并新设地址为 %newAddr"
     //% weight=100
-    export function initVL6180(addr: number): void {
+    export function initVL6180(newAddr?: number): void {
+        newAddr = newAddr ? newAddr:0x29
         // wait for Hardware standby and DeviceBooted
         basic.pause(2)
-        initVL6180_impl(addr)
+        initVL6180_impl(DefaultAddr)
+        if (newAddr != DefaultAddr) {
+            setNewAddr(DefaultAddr, newAddr)
+        }
+        
+        control.raiseEvent(VL6180Inited, newAddr)
     }
 
     /**
@@ -29,11 +38,14 @@ namespace VL6180 {
      */
     //%  addr.min=0x07 addr.max=0x77 addr.defl=0x29 
     //%  newAddr.min=0x07 addr.newAddr=0x77 newAddr.defl=0x29
-    //% block="设置在地址 %addr 的VL6180|新地址为 %newAddr"
+    // block="设置在地址 %addr 的VL6180|新地址为 %newAddr"
     //% weight=10
-    export function setNewAddr(addr: number, newAddr: number):void {
+    export function setNewAddr(addr: Addr, newAddr: number):void {
+        // wait for Hardware standby and DeviceBooted
+        basic.pause(2)
         write1Byte(addr, I2C_SLAVE__DEVICE_ADDRESS, newAddr)
     }
+
 
     /**
      * 获取距离
@@ -41,23 +53,47 @@ namespace VL6180 {
      */
     //% addr.min=0x07 addr.max=0x77 addr.defl=0x29 
     //% block="读取地址为 %addr 的VL6180的距离"
-    export function readRange(addr: number): number {
+    export function readRange(addr: Addr): number {
+        // if continual, read history
+        if ((read1Byte(addr, SYSRANGE__START) & 0x02) != 0) {
+            return readLatestRange(addr)
+        } 
+
+        waitRangReady(addr)
         write1Byte(addr, SYSRANGE__START, 1)
         return waitARange(addr)
     }
 
     // todo: SNR, SystemError, ECE Failed, Offset CAL
 
-    //% block="当VL6180测到数据时，平滑窗口为 %meanTimes"
-    export function continualRange(meanTimes:number, body:()=>void):void {
+    // range 测量事件
+    //% addr.min=0x07 addr.max=0x77 addr.defl=0x29 
+    //% block="当地址为 %addr 的VL6180测到 $value 时"
+    //% draggableParameters="reporter"
+    export function continualRange(addr: Addr, body: (value: number) => void):void {
+        control.inBackground(function() {
+            // wait for Initialization
+            control.waitForEvent(VL6180Inited, addr)
+            waitRangReady(addr)
+            
+            // period = (periodValue + 1) * 10 ms
+            const periodValue = 9 // 100 ms
+            write1Byte(addr, SYSRANGE__INTERMEASUREMENT_PERIOD, periodValue)
+            // enable history
+            write1Byte(addr, SYSTEM__HISTORY_CTRL, 0x01)
+            write1Byte(addr, SYSRANGE__START, 3)
 
-    }
-
-    //% block
-    export function latestValue():number {
-        return 0
+            while (true) {
+                body(waitARange(addr))
+                basic.pause(10)
+            }
+        })
     }
 }
+
+type Addr = number
+
+const DefaultAddr = 0x29
 
 // reg addr
 const SYSRANGE__START = 0x18
@@ -69,6 +105,12 @@ const I2C_SLAVE__DEVICE_ADDRESS = 0x212
 const SYSTEM__INTERRUPT_CONFIG_GPIO = 0x14
 const SYSRANGE__THRESH_HIGH = 0x019
 const SYSRANGE__THRESH_LOW = 0x019
+const SYSRANGE__INTERMEASUREMENT_PERIOD = 0x01B
+const READOUT__AVERAGING_SAMPLE_PERIOD = 0x10A
+const SYSRANGE__MAX_CONVERGENCE_TIME = 0x01C
+const RESULT__RANGE_STATUS = 0x04D
+const SYSTEM__HISTORY_CTRL = 0x012
+const RESULT__HISTORY_BUFFER_x = 0x052
 
 const CONFIG_GPIO_INTERRUPT_NEW_SAMPLE_READY = 0x04
 /** clear ranging interrupt in write to #SYSTEM_INTERRUPT_CLEAR */
@@ -77,11 +119,16 @@ const INTERRUPT_CLEAR_RANGING = 0x01
 const INTERRUPT_CLEAR_ALS = 0x02
 /** clear error interrupt in write to #SYSTEM_INTERRUPT_CLEAR */
 const INTERRUPT_CLEAR_ERROR = 0x04
+const RANGE_DEVICE_READY_MASK = 0x01
+
+let VL6180Inited = control.allocateEventSource()
 
 // Initialize sensor with settings from ST application note AN4545, section
 // "SR03 settings" - "Mandatory : private registers"
 function initVL6180_impl(i2caddr: number) {
     if (read1Byte(i2caddr, SYSTEM__FRESH_OUT_OF_RESET) == 1) {
+        // "Mandatory : private registers"
+         
         write1Byte(i2caddr, 0x207, 0x01);
         write1Byte(i2caddr, 0x208, 0x01);
         write1Byte(i2caddr, 0x096, 0x00);
@@ -114,6 +161,18 @@ function initVL6180_impl(i2caddr: number) {
         write1Byte(i2caddr, 0x1A7, 0x1F);
         write1Byte(i2caddr, 0x030, 0x00);
 
+        // "Recommended : Public registers"
+
+        // readout__averaging_sample_period = 48
+        write1Byte(i2caddr, READOUT__AVERAGING_SAMPLE_PERIOD, 0x30);
+        
+        // Reset other settings to power-on defaults
+
+        // sysrange__max_convergence_time = 49 (49 ms)
+        write1Byte(i2caddr, SYSRANGE__MAX_CONVERGENCE_TIME, 0x31);
+
+        // Thresh and open interrupt
+
         // set range interrupt
         write1Byte(i2caddr, SYSTEM__INTERRUPT_CONFIG_GPIO, CONFIG_GPIO_INTERRUPT_NEW_SAMPLE_READY)
         // range: 8~200 
@@ -124,6 +183,13 @@ function initVL6180_impl(i2caddr: number) {
 
         write1Byte(i2caddr, SYSTEM__FRESH_OUT_OF_RESET, 0)
     }
+
+    // stop. This will actually start a single measurement of range
+    // if continuous mode is not active, so it's a good idea to
+    // wait a few hundred ms after calling this function to let that complete
+    // before starting continuous mode again or taking a reading.
+    write1Byte(i2caddr, SYSRANGE__START, 1)
+    basic.pause(100)
 }
 
 function write1Byte(i2caddr: number, reg: number, value: number) {
@@ -143,7 +209,7 @@ function read1Byte(i2caddr: number, reg: number) {
     return pins.i2cReadNumber(i2caddr, NumberFormat.UInt8BE, false)
 }
 
-function waitARange(addr: number):number {
+function waitARange(addr: Addr):number {
     // pre-cal + ct of 50mm 88% + readout
     const delay = 3.2 + 0.24 + 4.3
     basic.pause(delay)
@@ -154,5 +220,15 @@ function waitARange(addr: number):number {
     let ret = read1Byte(addr, RESULT__RANGE_VAL)
     write1Byte(addr, SYSTEM__INTERRUPT_CLEAR, INTERRUPT_CLEAR_RANGING)
     return ret
+}
+
+function waitRangReady(addr: Addr):void {
+    while ((read1Byte(addr, RESULT__RANGE_STATUS) & RANGE_DEVICE_READY_MASK) == 0) {
+        basic.pause(10)
+    }
+}
+
+function readLatestRange(addr: Addr): number {
+    return read1Byte(addr, RESULT__HISTORY_BUFFER_x)
 }
 
