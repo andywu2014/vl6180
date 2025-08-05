@@ -9,6 +9,7 @@
  * VL6180 blocks
  */
 //% weight=40 color=#D35B53 icon="\uf2db"
+//% groups=['others', '计算', '标定', '状态']
 namespace VL6180 {
     
     /**
@@ -53,9 +54,11 @@ namespace VL6180 {
      */
     //% addr.min=0x07 addr.max=0x77 addr.defl=0x29 
     //% block="读取地址为 %addr 的VL6180的距离"
+    //% weight=99
     export function readRange(addr: Addr): number {
         // if continual, read history
         if ((read1Byte(addr, SYSRANGE__START) & 0x02) != 0) {
+            basic.pause((read1Byte(addr, SYSRANGE__INTERMEASUREMENT_PERIOD) + 1) * 10)
             return readLatestRange(addr)
         } 
 
@@ -64,12 +67,13 @@ namespace VL6180 {
         return waitARange(addr)
     }
 
-    // todo: SNR, SystemError, ECE Failed, Offset CAL
-
-    // range 测量事件
+    /**
+     *  range 测量事件
+     */
     //% addr.min=0x07 addr.max=0x77 addr.defl=0x29 
     //% block="当地址为 %addr 的VL6180测到 $value 时"
     //% draggableParameters="reporter"
+    //% weight=98
     export function continualRange(addr: Addr, body: (value: number) => void):void {
         control.inBackground(function() {
             // wait for Initialization
@@ -79,8 +83,6 @@ namespace VL6180 {
             // period = (periodValue + 1) * 10 ms
             const periodValue = 9 // 100 ms
             write1Byte(addr, SYSRANGE__INTERMEASUREMENT_PERIOD, periodValue)
-            // enable history
-            write1Byte(addr, SYSTEM__HISTORY_CTRL, 0x01)
             write1Byte(addr, SYSRANGE__START, 3)
 
             while (true) {
@@ -88,6 +90,122 @@ namespace VL6180 {
                 basic.pause(10)
             }
         })
+    }
+
+    /**
+     * 最近几次的平均值，去掉最远端的无效值(0与255)
+     */ 
+    //% addr.min=0x07 addr.max=0x77 addr.defl=0x29 
+    //% n.min=2 n.max=16 n.defl=5
+    //% removeMaxMin.defl=true
+    //% block="获取地址为 %addr 的VL6180 最近 %n 次的平均值 || ，去掉最值 %removeMaxMin"
+    //% weight=97
+    //% group="计算"
+    export function averageLastest(addr: Addr, n: number, removeMaxMin?: boolean): number {
+        removeMaxMin = removeMaxMin ? removeMaxMin:true
+        let buffer = readToBuffer(addr, RESULT__HISTORY_BUFFER_x, n)
+        let min = 255, max = 0, sum = 0, count = 0
+        // trim 0&255
+        let offset = n-1
+        for (; offset >= 1; offset--) {
+            let v = buffer.getUint8(offset)
+            if (v != 0 && v != 255) {
+                break
+            }
+        }
+
+        // 多于3个数 才去最值
+        if (offset < 2) {
+            removeMaxMin = false
+        }
+
+        for (; offset >= 0; offset--) {
+            let v = buffer.getUint8(offset)
+            sum += v
+            min = Math.min(min, v)
+            max = Math.max(max, v)
+            count++
+        }
+
+        if (removeMaxMin) {
+            sum = sum - max - min
+            count -= 2
+        }
+
+        return Math.round(sum / count)
+    }
+
+    /**
+    * 最近测量的错误码
+    */
+    //% addr.min=0x07 addr.max=0x77 addr.defl=0x29 
+    //% block="地址为 %addr 的 VL6180 最近错误码"
+    //% weight=89
+    //% group="状态"
+    export function errorCode(addr: Addr): number {
+        return read1Byte(addr, RESULT__RANGE_STATUS) >> 4
+    }
+
+    /**
+     * 最大量程
+     */
+    //% addr.min=0x07 addr.max=0x77 addr.defl=0x29 
+    //% block="地址为 %addr 的 VL6180 最大量程 mm"
+    //% weight=88
+    //% group="状态"
+    export function maxRange(addr: Addr): number {
+        return read1Byte(addr, SYSRANGE__THRESH_HIGH)
+    }
+
+    /**
+     * 最小量程
+     */
+    //% addr.min=0x07 addr.max=0x77 addr.defl=0x29 
+    //% block="地址为 %addr 的 VL6180 最小量程 mm"
+    //% weight=87
+    //% group="状态"
+    export function minRange(addr: Addr): number {
+        return read1Byte(addr, SYSRANGE__THRESH_LOW)
+    }
+
+    /**
+     * offset 标定值
+     */
+    //% addr.min=0x07 addr.max=0x77 addr.defl=0x29 
+    //% block="地址为 %addr 的 VL6180 Offset 标定值"
+    //% weight=79
+    //% group="标定"
+    export function rangOffsetCalibration(addr: Addr): number {
+        return readInt8(addr, SYSRANGE__PART_TO_PART_RANGE_OFFSET)
+    }
+
+    /**
+     * 在 50mm 处标定offset
+     */
+    //% addr.min=0x07 addr.max=0x77 addr.defl=0x29 
+    //% targetDis.defl=50
+    //% block="标定地址为 %addr VL6180 的 Offset || ，使用 %targetDis mm 处白色物体标注"
+    //% weight=78
+    //% group="标定"
+    export function offsetCalibrationAt50mm(addr: Addr, targetDis?: number) {
+        targetDis = targetDis ? targetDis : 50
+    
+        let sum = 0
+        for (let i = 0; i < 10; i++) {
+            sum += readRange(addr)
+        }
+        if (Math.abs(50 - sum / 10) <= 3) {
+            return
+        }
+        
+        writeInt8(addr, SYSRANGE__PART_TO_PART_RANGE_OFFSET, 0)
+
+        sum = 0
+        for (let i = 0; i < 10; i++) {
+            sum += readRange(addr)
+        }
+
+        writeInt8(addr, SYSRANGE__PART_TO_PART_RANGE_OFFSET, targetDis - sum / 10)
     }
 }
 
@@ -111,6 +229,7 @@ const SYSRANGE__MAX_CONVERGENCE_TIME = 0x01C
 const RESULT__RANGE_STATUS = 0x04D
 const SYSTEM__HISTORY_CTRL = 0x012
 const RESULT__HISTORY_BUFFER_x = 0x052
+const SYSRANGE__PART_TO_PART_RANGE_OFFSET = 0x024
 
 const CONFIG_GPIO_INTERRUPT_NEW_SAMPLE_READY = 0x04
 /** clear ranging interrupt in write to #SYSTEM_INTERRUPT_CLEAR */
@@ -125,7 +244,7 @@ let VL6180Inited = control.allocateEventSource()
 
 // Initialize sensor with settings from ST application note AN4545, section
 // "SR03 settings" - "Mandatory : private registers"
-function initVL6180_impl(i2caddr: number) {
+function initVL6180_impl(i2caddr: Addr) {
     if (read1Byte(i2caddr, SYSTEM__FRESH_OUT_OF_RESET) == 1) {
         // "Mandatory : private registers"
          
@@ -181,6 +300,9 @@ function initVL6180_impl(i2caddr: number) {
         // clear all interrupt
         write1Byte(i2caddr, SYSTEM__INTERRUPT_CLEAR, INTERRUPT_CLEAR_ERROR | INTERRUPT_CLEAR_RANGING | INTERRUPT_CLEAR_ALS)
 
+        // enable history
+        write1Byte(i2caddr, SYSTEM__HISTORY_CTRL, 0x01)
+
         write1Byte(i2caddr, SYSTEM__FRESH_OUT_OF_RESET, 0)
     }
 
@@ -192,14 +314,21 @@ function initVL6180_impl(i2caddr: number) {
     basic.pause(100)
 }
 
-function write1Byte(i2caddr: number, reg: number, value: number) {
+function write1Byte(i2caddr: Addr, reg: number, value: number) {
     let buf = pins.createBuffer(3)
     buf.setNumber(NumberFormat.UInt16BE, 0, reg)
     buf.setNumber(NumberFormat.UInt8BE, 2, value)
     pins.i2cWriteBuffer(i2caddr, buf)
 }
 
-function read1Byte(i2caddr: number, reg: number) {
+function writeInt8(i2caddr: Addr, reg: number, value: number) {
+    let buf = pins.createBuffer(3)
+    buf.setNumber(NumberFormat.UInt16BE, 0, reg)
+    buf.setNumber(NumberFormat.Int8BE, 2, value)
+    pins.i2cWriteBuffer(i2caddr, buf)
+}
+
+function read1Byte(i2caddr: Addr, reg: number): number {
     pins.i2cWriteNumber(
         i2caddr,
         reg,
@@ -207,6 +336,26 @@ function read1Byte(i2caddr: number, reg: number) {
         true
     )
     return pins.i2cReadNumber(i2caddr, NumberFormat.UInt8BE, false)
+}
+
+function readInt8(i2caddr: Addr, reg: number): number {
+    pins.i2cWriteNumber(
+        i2caddr,
+        reg,
+        NumberFormat.UInt16BE,
+        true
+    )
+    return pins.i2cReadNumber(i2caddr, NumberFormat.Int8BE, false)
+}
+
+function readToBuffer(i2caddr: Addr, reg: number, size: number): Buffer {
+    pins.i2cWriteNumber(
+        i2caddr,
+        reg,
+        NumberFormat.UInt16BE,
+        true
+    )
+    return pins.i2cReadBuffer(i2caddr, size, false)
 }
 
 function waitARange(addr: Addr):number {
