@@ -132,7 +132,7 @@ namespace VL6180 {
             count -= 2
         }
 
-        return Math.round(sum / count)
+        return sum / count
     }
 
     /**
