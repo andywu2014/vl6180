@@ -136,6 +136,18 @@ namespace VL6180 {
     }
 
     /**
+    * 清空buffer
+    */
+    //% addr.min=0x07 addr.max=0x77 addr.defl=0x29 
+    //% block="清空地址为 %addr 的VL6180 的 Buffer"
+    //% weight=96
+    //% group="计算"
+    export function clearBuffer(addr: Addr) {
+        // clear buffer and enable history
+        write1Byte(addr, SYSTEM__HISTORY_CTRL, 0x05)
+    }
+
+    /**
     * 最近测量的错误码
     */
     //% addr.min=0x07 addr.max=0x77 addr.defl=0x29 
