@@ -217,7 +217,7 @@ namespace VL6180 {
             sum += readRange(addr)
         }
 
-        writeInt8(addr, SYSRANGE__PART_TO_PART_RANGE_OFFSET, targetDis - sum / 10)
+        writeInt8(addr, SYSRANGE__PART_TO_PART_RANGE_OFFSET, targetDis - Math.round(sum / 10))
     }
 }
 
