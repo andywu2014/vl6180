@@ -57,14 +57,12 @@ namespace VL6180 {
     //% weight=99
     export function readRange(addr: Addr): number {
         // if continual, read history
-        if ((read1Byte(addr, SYSRANGE__START) & 0x02) != 0) {
+        if (isContinualMode(addr)) {
             basic.pause((read1Byte(addr, SYSRANGE__INTERMEASUREMENT_PERIOD) + 1) * 10)
             return readLatestRange(addr)
         } 
 
-        waitRangReady(addr)
-        write1Byte(addr, SYSRANGE__START, 1)
-        return waitARange(addr)
+        return startASingleMeasurement(addr)
     }
 
     /**
@@ -102,6 +100,11 @@ namespace VL6180 {
     //% weight=97
     //% group="计算"
     export function averageLastest(addr: Addr, n: number, removeMaxMin?: boolean): number {
+        // if not continual, start a single measurement
+        if (!isContinualMode(addr)) {
+            startASingleMeasurement(addr)
+        }
+
         removeMaxMin = removeMaxMin ? removeMaxMin:true
         let buffer = readToBuffer(addr, RESULT__HISTORY_BUFFER_x, n)
         let min = 255, max = 0, sum = 0, count = 0
@@ -402,5 +405,15 @@ function waitRangReady(addr: Addr):void {
 
 function readLatestRange(addr: Addr): number {
     return read1Byte(addr, RESULT__HISTORY_BUFFER_x)
+}
+
+function isContinualMode(addr: Addr): boolean {
+    return (read1Byte(addr, SYSRANGE__START) & 0x02) != 0
+}
+
+function startASingleMeasurement(addr: Addr): number {
+    waitRangReady(addr)
+    write1Byte(addr, SYSRANGE__START, 1)
+    return waitARange(addr)
 }
 
