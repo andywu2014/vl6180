@@ -192,12 +192,23 @@ namespace VL6180 {
     }
 
     /**
+     * set offset 标定值
+     */
+    //% addr.min=0x07 addr.max=0x77 addr.defl=0x29 
+    //% block="设置地址为 %addr 的 VL6180 Offset标定值为 %offset "
+    //% weight=78
+    //% group="标定"
+    export function setRangOffsetCalibration(addr: Addr, offset: number) {
+        writeInt8(addr, SYSRANGE__PART_TO_PART_RANGE_OFFSET, offset)
+    }
+
+    /**
      * 在 50mm 处标定offset
      */
     //% addr.min=0x07 addr.max=0x77 addr.defl=0x29 
     //% targetDis.defl=50
     //% block="标定地址为 %addr VL6180 的 Offset || ，使用 %targetDis mm 处白色物体标注"
-    //% weight=78
+    //% weight=77
     //% group="标定"
     export function offsetCalibrationAt50mm(addr: Addr, targetDis?: number) {
         targetDis = targetDis ? targetDis : 50
@@ -206,7 +217,7 @@ namespace VL6180 {
         for (let i = 0; i < 10; i++) {
             sum += readRange(addr)
         }
-        if (Math.abs(50 - sum / 10) <= 3) {
+        if (Math.abs(targetDis - sum / 10) <= 3) {
             return
         }
         
