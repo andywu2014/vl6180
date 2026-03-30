@@ -7,8 +7,6 @@
         "core": "*"
     },
     "files": [
-        "main.blocks",
-        "main.ts",
         "README.md",
         "vl6180.ts"
     ],
@@ -23,5 +21,6 @@
     "supportedTargets": [
         "microbit"
     ],
-    "preferredEditor": "tsprj"
+    "preferredEditor": "tsprj",
+    "languageRestriction": "javascript-only"
 }
